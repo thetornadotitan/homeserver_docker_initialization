@@ -29,19 +29,26 @@ fi
 
 cd "${APP_DIR}"
 
-# Install deps (supports npm/yarn/pnpm if you want; this is npm-only)
+# Install deps
 if [[ -f package-lock.json ]]; then
   npm ci
 else
   npm install
 fi
 
-# Build if present (Nest/TS typically has this)
+# Build if present
 npm run build --if-present
 
-# Start (Nest: start:prod often; Express: start)
-if npm run start:prod --if-present; then
-  :
+echo "Starting app..."
+
+# Prefer start:prod if it exists, otherwise start
+if node -e 'process.exit((require("./package.json").scripts||{})["start:prod"] ? 0 : 1)'; then
+  exec npm run start:prod
+elif node -e 'process.exit((require("./package.json").scripts||{}).start ? 0 : 1)'; then
+  exec npm run start
 else
-  npm run start
+  echo "ERROR: No start script found in package.json (need scripts.start or scripts.start:prod)" >&2
+  echo "package.json scripts:" >&2
+  node -e 'console.error(JSON.stringify((require("./package.json").scripts||{}), null, 2))' >&2
+  exit 1
 fi
