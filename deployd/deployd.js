@@ -41,9 +41,7 @@ const POLL_SECONDS = Number(process.env.POLL_SECONDS || 60);
 
 const DEFAULT_BRANCH = process.env.DEFAULT_BRANCH || "main";
 
-const SSH_KEY_PATH = abs(
-  process.env.SSH_KEY_PATH || "~/secrets/deploy_key",
-);
+const SSH_KEY_PATH = abs(process.env.SSH_KEY_PATH || "~/secrets/deploy_key");
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -178,50 +176,62 @@ function runCompose(composeDir, composeFile, composeServiceName) {
   });
 }
 
+let isTickRunning = false;
+
 async function tick() {
-  const state = readState();
-  const services = discoverServices();
+  if (isTickRunning) return;
+  isTickRunning = true;
+  try {
+    const state = readState();
+    const services = discoverServices();
 
-  // remove stale entries
-  const currentNames = new Set(services.map((s) => s.name));
-  for (const k of Object.keys(state.services || {})) {
-    if (!currentNames.has(k)) delete state.services[k];
-  }
-
-  for (const svc of services) {
-    const prev = state.services[svc.name]?.sha || "";
-    let remote;
-    try {
-      remote = gitRemoteSha(svc.repoUrl, svc.branch);
-    } catch (e) {
-      log(`[${svc.name}] ERROR reading remote SHA: ${e.message}`);
-      continue;
-    }
-    if (!remote) {
-      log(`[${svc.name}] ERROR: remote sha empty`);
-      continue;
+    // remove stale entries
+    const currentNames = new Set(services.map((s) => s.name));
+    for (const k of Object.keys(state.services || {})) {
+      if (!currentNames.has(k)) delete state.services[k];
     }
 
-    if (remote === prev) {
-      log(`[${svc.name}] no change (${svc.branch}@${remote.slice(0, 7)})`);
-      continue;
-    }
+    for (const svc of services) {
+      const prev = state.services[svc.name]?.sha || "";
+      let remote;
+      try {
+        remote = gitRemoteSha(svc.repoUrl, svc.branch);
+      } catch (e) {
+        log(`[${svc.name}] ERROR reading remote SHA: ${e.message}`);
+        continue;
+      }
+      if (!remote) {
+        log(`[${svc.name}] ERROR: remote sha empty`);
+        continue;
+      }
 
-    log(
-      `[${svc.name}] change detected: ${prev.slice(0, 7)} -> ${remote.slice(0, 7)}`,
-    );
+      if (remote === prev) {
+        log(`[${svc.name}] no change (${svc.branch}@${remote.slice(0, 7)})`);
+        continue;
+      }
 
-    try {
-      await runCompose(svc.composeDir, svc.composeFile, svc.composeServiceName);
-      state.services[svc.name] = {
-        sha: remote,
-        lastDeployAt: new Date().toISOString(),
-      };
-      writeState(state);
-      log(`[${svc.name}] deployed`);
-    } catch (e) {
-      log(`[${svc.name}] DEPLOY FAILED: ${e.message}`);
+      log(
+        `[${svc.name}] change detected: ${prev.slice(0, 7)} -> ${remote.slice(0, 7)}`,
+      );
+
+      try {
+        await runCompose(
+          svc.composeDir,
+          svc.composeFile,
+          svc.composeServiceName,
+        );
+        state.services[svc.name] = {
+          sha: remote,
+          lastDeployAt: new Date().toISOString(),
+        };
+        writeState(state);
+        log(`[${svc.name}] deployed`);
+      } catch (e) {
+        log(`[${svc.name}] DEPLOY FAILED: ${e.message}`);
+      }
     }
+  } finally {
+    isTickRunning = false;
   }
 }
 
