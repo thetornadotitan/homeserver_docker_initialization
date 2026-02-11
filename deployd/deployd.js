@@ -12,11 +12,20 @@ import { dirname, join, basename, isAbsolute, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync, spawn } from "child_process";
 import { parse } from "yaml";
+import os from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+function expandHome(p) {
+  if (!p) return p;
+  if (p === "~") return os.homedir();
+  if (p.startsWith("~/")) return join(os.homedir(), p.slice(2));
+  return p;
+}
+
 function abs(p) {
+  p = expandHome(p);
   return isAbsolute(p) ? p : resolve(__dirname, p);
 }
 
@@ -31,6 +40,10 @@ const STATE_FILE = process.env.STATE_FILE
 const POLL_SECONDS = Number(process.env.POLL_SECONDS || 60);
 
 const DEFAULT_BRANCH = process.env.DEFAULT_BRANCH || "main";
+
+const SSH_KEY_PATH = abs(
+  process.env.SSH_KEY_PATH || "~/secrets/deploy_key",
+);
 
 function log(...args) {
   console.log(new Date().toISOString(), ...args);
@@ -129,15 +142,19 @@ function discoverServices() {
 }
 
 function gitRemoteSha(repoUrl, branch) {
-  // Uses SSH config/keys available to the process user
   const out = execFileSync(
     "git",
     ["ls-remote", repoUrl, `refs/heads/${branch}`],
-    { encoding: "utf8" },
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_SSH_COMMAND: `ssh -i "${SSH_KEY_PATH}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`,
+      },
+    },
   ).trim();
-  // format: "<sha>\trefs/heads/main"
-  const sha = out.split(/\s+/)[0];
-  return sha || null;
+
+  return out.split(/\s+/)[0] || null;
 }
 
 function runCompose(composeDir, composeFile, composeServiceName) {
