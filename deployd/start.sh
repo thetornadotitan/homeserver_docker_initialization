@@ -3,15 +3,15 @@ set -euo pipefail
 
 # ---- Config (edit if you want) ----
 APP_NAME="${APP_NAME:-deployd}"
-DEPLOYD_DIR="${DEPLOYD_DIR:-~/homeserver_docker_initialization/deployd}"
+DEPLOYD_DIR="${DEPLOYD_DIR:-$HOME/homeserver_docker_initialization/deployd}"
 ENTRY_FILE="${ENTRY_FILE:-deployd.js}"
 
 # Optional env vars for your deployd process
-export SERVICES_ROOT="~/homeserver_docker_initialization/services"
-export STATE_FILE="~/homeserver_docker_initialization/deployd/state.json"
+export SERVICES_ROOT="$HOME/homeserver_docker_initialization/services"
+export STATE_FILE="$HOME/homeserver_docker_initialization/deployd/state.json"
+export SSH_KEY_PATH="$HOME/secrets/deploy_key"
 export POLL_SECONDS="60"
 export DEFAULT_BRANCH="main"
-export SSH_KEY_PATH="~/secrets/deploy_key"
 
 # PM2 logrotate config (defaults are reasonable; tweak if you want)
 LOGROTATE_MAX_SIZE="${LOGROTATE_MAX_SIZE:-10M}"
