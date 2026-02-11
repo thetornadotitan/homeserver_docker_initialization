@@ -3,7 +3,7 @@ services:
   # PUBLIC EDGE (Internet -> Cloudflare Tunnel -> Traefik Public -> Public services)
   # -----------------------------
   traefik_public:
-    image: traefik:v3.1
+    image: traefik:v3.6.7
     container_name: traefik_public
     restart: unless-stopped
     command:
@@ -33,7 +33,7 @@ services:
   # ADMIN EDGE (LAN-only -> Traefik Admin -> Admin services)
   # -----------------------------
   traefik_admin:
-    image: traefik:v3.1
+    image: traefik:v3.6.7
     container_name: traefik_admin
     restart: unless-stopped
     command:
