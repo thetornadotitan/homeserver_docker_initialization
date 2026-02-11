@@ -1,0 +1,77 @@
+services:
+  # -----------------------------
+  # PUBLIC EDGE (Internet -> Cloudflare Tunnel -> Traefik Public -> Public services)
+  # -----------------------------
+  traefik_public:
+    image: traefik:v3.1
+    container_name: traefik_public
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.constraints=Label(`traefik.group`,`public`)
+      - --entrypoints.web.address=:80
+      - --log.level=INFO
+    networks:
+      - public_proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks:
+      - public_proxy
+    depends_on:
+      - traefik_public
+
+  # -----------------------------
+  # ADMIN EDGE (LAN-only -> Traefik Admin -> Admin services)
+  # -----------------------------
+  traefik_admin:
+    image: traefik:v3.1
+    container_name: traefik_admin
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.constraints=Label(`traefik.group`,`admin`)
+      - --entrypoints.web.address=:80
+      - --log.level=INFO
+    networks:
+      - admin_proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "${LAN_IP}:80:80"
+      # If you later want LAN TLS:
+      - "${LAN_IP}:443:443"
+
+  # -----------------------------
+  # DNS + Adblocking + Internal Domains
+  # -----------------------------
+  adguard:
+    image: adguard/adguardhome:latest
+    container_name: adguard
+    restart: unless-stopped
+    networks:
+      - admin_proxy
+    ports:
+      - "${LAN_IP}:53:53/tcp"
+      - "${LAN_IP}:53:53/udp"
+      - "${LAN_IP}:3000:3000" # initial setup UI
+    volumes:
+      - ./adguard/work:/opt/adguardhome/work
+      - ./adguard/conf:/opt/adguardhome/conf
+
+networks:
+  public_proxy:
+    name: public_proxy
+    driver: bridge
+  admin_proxy:
+    name: admin_proxy
+    driver: bridge
