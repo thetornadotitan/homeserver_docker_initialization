@@ -26,4 +26,9 @@ volumes:
 
 secrets:
   deploy_key:
-    file: ./secrets/deploy_key
+    file: ~/secrets/deploy_key
+
+networks:
+  public_proxy:
+    external: true
+    name: public_proxy
