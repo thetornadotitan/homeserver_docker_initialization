@@ -16,6 +16,11 @@ services:
       - public_proxy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      # List in services
+      - catalog.enable=true
+      - catalog.name=Traefik Public
+      - catalog.description=Auto discovery and proxy for WAN services.
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -28,6 +33,11 @@ services:
       - public_proxy
     depends_on:
       - traefik_public
+    labels:
+      # List in services
+      - catalog.enable=true
+      - catalog.name=Cloudflared
+      - catalog.description=Exposes Traefik Public services to the internet.
 
   # -----------------------------
   # ADMIN EDGE (LAN-only -> Traefik Admin -> Admin services)
@@ -48,8 +58,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       - "${LAN_IP}:80:80"
-      # If you later want LAN TLS:
       - "${LAN_IP}:443:443"
+    labels:
+      # List in services
+      - catalog.enable=true
+      - catalog.name=Traefik Admin
+      - catalog.description=Auto discovery and proxy for LAN services.
 
   # -----------------------------
   # DNS + Adblocking + Internal Domains
@@ -67,6 +81,77 @@ services:
     volumes:
       - ./adguard/work:/opt/adguardhome/work
       - ./adguard/conf:/opt/adguardhome/conf
+    labels:
+      # List in services
+      - catalog.enable=true
+      - catalog.name=Adgarud
+      - catalog.description=Network level adblocking and local DNS.
+
+  docker_socket_proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: docker_socket_proxy
+    restart: unless-stopped
+    networks:
+      - admin_proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Allow only what we need for listing containers
+      - CONTAINERS=1
+      - INFO=1
+      - VERSION=1
+      - POST=0
+      - IMAGES=0
+      - NETWORKS=0
+      - SERVICES=0
+      - TASKS=0
+      - SWARM=0
+      - SYSTEM=0
+      - EXEC=0
+
+  service_catalog:
+    build: ./service_catalog
+    container_name: service_catalog
+    restart: unless-stopped
+    networks:
+      - admin_proxy
+    environment:
+      - DOCKER_HOST=tcp://docker_socket_proxy:2375
+      - PORT=3000
+      - CATALOG_LABEL=catalog.enable
+      - REFRESH_INTERVAL_MS=10000
+      - REQUEST_TIMEOUT_MS=3000
+      - DEGRADED_THRESHOLD_MS=800
+      - MAX_RETRIES=3
+      - MAX_CONCURRENT_CHECKS=10
+      - LAN_BASE_URL=http://${LAN_IP}
+    depends_on:
+      - docker_socket_proxy
+    labels:
+      - traefik.enable=true
+      - traefik.group=admin
+      # ---- DNS/hosts-file access ----
+      - traefik.http.routers.service_catalog.rule=Host(`catalog.hh`)
+      - traefik.http.routers.service_catalog.entrypoints=web
+      - traefik.http.routers.service_catalog.service=service_catalog
+
+      # ---- IP access via path prefix ----
+      - traefik.http.routers.service_catalog_ip.rule=PathPrefix(`/hh/catalog`)
+      - traefik.http.routers.service_catalog_ip.entrypoints=web
+      - traefik.http.routers.service_catalog_ip.priority=1
+      - traefik.http.routers.service_catalog_ip.service=service_catalog
+      - traefik.http.routers.service_catalog_ip.middlewares=service_catalog_strip
+
+      # middleware definition
+      - traefik.http.middlewares.service_catalog_strip.stripprefix.prefixes=/hh/catalog
+
+      # service port definition
+      - traefik.http.services.service_catalog.loadbalancer.server.port=3000
+
+      # List in services
+      - catalog.enable=true
+      - catalog.name=Catalog Service
+      - catalog.description=Admin Updates the list of services running on the container.
 
 networks:
   public_proxy:

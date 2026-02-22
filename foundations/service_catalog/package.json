@@ -1,0 +1,9 @@
+{
+  "name": "service-catalog",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "dockerode": "^4.0.2",
+    "express": "^4.19.2"
+  }
+}
