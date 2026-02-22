@@ -98,7 +98,7 @@ services:
       - traefik.http.routers.adguard.rule=Host(`adguard.hh`)
       - traefik.http.routers.adguard.entrypoints=web
       - traefik.http.routers.adguard.service=adguard
-      - traefik.http.services.adguard.loadbalancer.server.port=80
+      - traefik.http.services.adguard.loadbalancer.server.port=3000
 
       # ---- IP access via path prefix (now) ----
       - traefik.http.routers.adguard_ip.rule=PathPrefix(`/hh/adguard`)
