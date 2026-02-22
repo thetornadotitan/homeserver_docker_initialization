@@ -14,7 +14,7 @@ const MAX_RETRIES = Number(process.env.MAX_RETRIES || 3);
 const MAX_CONCURRENT_CHECKS = Number(process.env.MAX_CONCURRENT_CHECKS || 10);
 
 // For PathPrefix(...) -> LAN_BASE_URL + /path
-// Example: http://192.168.1.50
+// Example: http://traefik_admin
 const LAN_BASE_URL = (process.env.LAN_BASE_URL || "").trim().replace(/\/$/, "");
 
 // ---- In-memory cache ----
@@ -46,7 +46,7 @@ function parseTraefikHostUrls(labels = {}) {
     if (!k.endsWith(".rule")) continue;
     const str = String(v);
 
-    // Host(`a.b`) or Host(`a.b`,`c.d`) etc. We'll grab all backtick-wrapped strings.
+    // Host(`a.b`) or Host(`a.b`,`c.d`)
     const matches = [...str.matchAll(/Host\(([^)]+)\)/g)];
     for (const m of matches) {
       const inside = m[1] || "";
@@ -64,7 +64,7 @@ function parseTraefikPathPrefixes(labels = {}) {
     if (!k.endsWith(".rule")) continue;
     const str = String(v);
 
-    // Match PathPrefix(`/a`) or PathPrefix(`/a`,`/b`)
+    // PathPrefix(`/a`) or PathPrefix(`/a`,`/b`)
     const matches = [...str.matchAll(/PathPrefix\(([^)]+)\)/g)];
     for (const m of matches) {
       const inside = m[1] || "";
@@ -87,7 +87,7 @@ function buildLanUrlsFromPaths(paths) {
 
 /**
  * Normalize URLs so mount paths behave (e.g. /hh/adguard -> /hh/adguard/)
- * This reduces false "down" for apps that redirect or expect trailing slashes.
+ * Avoids false negatives for apps that expect trailing slashes.
  */
 function normalizeHealthUrl(raw) {
   try {
@@ -110,7 +110,7 @@ function normalizeHealthUrl(raw) {
 
 /**
  * Join a base URL with a health path, without breaking existing path prefixes.
- * Example: base=http://traefik_admin/hh/adguard  + /login.html
+ * Example: http://traefik_admin/hh/adguard + /login.html
  * => http://traefik_admin/hh/adguard/login.html
  */
 function joinUrl(base, path) {
@@ -124,21 +124,6 @@ function joinUrl(base, path) {
       : u.pathname || "";
 
     u.pathname = `${basePath}${addPath}`;
-    return u.toString();
-  } catch {
-    return base;
-  }
-}
-
-/**
- * Apply an explicit port to a URL (if provided).
- * If base already contains a port, this overrides it.
- */
-function applyPort(base, port) {
-  if (!port) return base;
-  try {
-    const u = new URL(base);
-    u.port = String(port);
     return u.toString();
   } catch {
     return base;
@@ -160,8 +145,6 @@ async function checkUrlHealth(url) {
       const res = await fetch(url, {
         method: "GET",
         signal: controller.signal,
-        // keep default redirect behavior (follow). If you ever change to "manual",
-        // keep the >=400 logic below.
       });
       clearTimeout(timeout);
 
@@ -202,10 +185,7 @@ async function checkCandidates(candidates) {
     const r = await checkUrlHealth(url);
 
     if (r.health === "up" || r.health === "degraded") {
-      return {
-        ...r,
-        checkedUrl: url,
-      };
+      return { ...r, checkedUrl: url };
     }
 
     lastFailure = r.error || "failed";
@@ -233,31 +213,35 @@ function mapContainerToService(c) {
         ? "private"
         : "unknown";
 
-  const name =
-    labels["catalog.name"] ||
-    (c.Names?.[0] ? c.Names[0].replace(/^\//, "") : c.Id?.slice(0, 12));
+  const containerName = c.Names?.[0] ? c.Names[0].replace(/^\//, "") : null;
+
+  const name = labels["catalog.name"] || containerName || c.Id?.slice(0, 12);
 
   const hostUrls = parseTraefikHostUrls(labels);
   const pathPrefixes = parseTraefikPathPrefixes(labels);
   const lanUrls = buildLanUrlsFromPaths(pathPrefixes);
 
   // ---- Health overrides (optional) ----
-  // Defaults: path="/" , port=null (no override)
+  // Defaults: path="/" , port=null
   const healthPath = (labels["catalog.health.path"] || "/").trim() || "/";
   const healthPort = safeInt(labels["catalog.health.port"]);
 
-  // Base candidates: LAN path routes + host routes
-  // (LAN first is fine since DNS might not exist yet)
-  const baseCandidates = uniq([...lanUrls, ...hostUrls]);
+  // Route candidates (Traefik routes). IMPORTANT: do NOT apply healthPort to these.
+  const routeCandidates = uniq([...lanUrls, ...hostUrls])
+    .map((u) => normalizeHealthUrl(u))
+    .map((u) => joinUrl(u, healthPath))
+    .map((u) => normalizeHealthUrl(u));
 
-  // Apply: normalize -> add healthPath -> apply port -> normalize again
-  const healthCandidates = uniq(
-    baseCandidates
-      .map((u) => normalizeHealthUrl(u))
-      .map((u) => joinUrl(u, healthPath))
-      .map((u) => applyPort(u, healthPort))
-      .map((u) => normalizeHealthUrl(u)),
-  );
+  // Port candidate (container DNS within Docker network), only if configured
+  // Example: http://adguard:3000/health
+  const portCandidates = [];
+  if (healthPort && containerName) {
+    const base = `http://${containerName}:${healthPort}`;
+    portCandidates.push(normalizeHealthUrl(joinUrl(base, healthPath)));
+  }
+
+  // Prefer route candidates first (tests the proxy path), then container:port fallback
+  const healthCandidates = uniq([...routeCandidates, ...portCandidates]);
 
   return {
     id: c.Id,
@@ -269,17 +253,16 @@ function mapContainerToService(c) {
     status: c.Status,
     created: c.Created,
 
-    urls: hostUrls, // pretty URLs
-    lanUrls, // LAN_BASE_URL + PathPrefix routes
+    urls: hostUrls,
+    lanUrls,
 
-    healthCandidates, // what health checker will try
+    healthCandidates,
     health: c.State === "running" ? "up" : "down",
     responseTimeMs: null,
     attempts: 0,
     error: null,
     checkedUrl: null,
 
-    // Useful for debugging what got applied (safe to expose)
     healthConfig: {
       path: healthPath,
       port: healthPort,
@@ -329,9 +312,7 @@ async function refreshSnapshot() {
     const checked = await mapWithConcurrency(
       mapped,
       async (svc) => {
-        if (svc.state !== "running") {
-          return { ...svc, health: "down" };
-        }
+        if (svc.state !== "running") return { ...svc, health: "down" };
 
         if (!svc.healthCandidates?.length) {
           // No routes found; treat running as "up"
@@ -362,9 +343,8 @@ async function refreshSnapshot() {
   } catch (err) {
     lastRefresh.error = err?.message || "refresh_error";
   } finally {
-    const dur = Date.now() - started;
     lastRefresh.finishedAt = new Date().toISOString();
-    lastRefresh.durationMs = dur;
+    lastRefresh.durationMs = Date.now() - started;
     refreshInFlight = false;
   }
 }
@@ -376,7 +356,6 @@ function startBackgroundLoop() {
 
 // ---- routes ----
 app.get("/health", (req, res) => res.json({ ok: true }));
-
 app.get("/", (req, res) => res.json({ ok: true }));
 
 app.get("/services", (req, res) => {
