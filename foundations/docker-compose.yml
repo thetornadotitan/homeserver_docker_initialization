@@ -18,7 +18,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
       # List in services
-      - traefik.group=public
+      - traefik.group=admin
       - catalog.enable=true
       - catalog.name=Traefik Public
       - catalog.description=Auto discovery and proxy for WAN services.
@@ -36,7 +36,7 @@ services:
       - traefik_public
     labels:
       # List in services
-      - traefik.group=public
+      - traefik.group=admin
       - catalog.enable=true
       - catalog.name=Cloudflared
       - catalog.description=Exposes Traefik Public services to the internet.
