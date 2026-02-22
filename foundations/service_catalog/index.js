@@ -106,10 +106,9 @@ async function checkUrlHealth(url) {
       }
 
       return {
-        health:
-          latency >= DEGRADED_THRESHOLD_MS || attempt > 1 ? "degraded" : "up",
+        health: latency >= DEGRADED_THRESHOLD_MS ? "degraded" : "up",
         responseTimeMs: latency,
-        attempts: attempt,
+        attempts: attempt, // still useful to return
         error: null,
       };
     } catch (err) {
@@ -128,22 +127,20 @@ async function checkUrlHealth(url) {
 }
 
 // Try a list of candidate URLs; first success wins.
-// degraded if slow OR if it only succeeded after failing earlier candidates.
 async function checkCandidates(candidates) {
-  let failuresBeforeSuccess = 0;
   let lastFailure = null;
 
   for (const url of candidates) {
     const r = await checkUrlHealth(url);
+
+    // checkUrlHealth returns up/degraded on success, down on failure
     if (r.health === "up" || r.health === "degraded") {
       return {
         ...r,
         checkedUrl: url,
-        // If earlier candidates failed, treat as degraded
-        health: failuresBeforeSuccess > 0 ? "degraded" : r.health,
       };
     }
-    failuresBeforeSuccess++;
+
     lastFailure = r.error || "failed";
   }
 
@@ -177,8 +174,7 @@ function mapContainerToService(c) {
   const pathPrefixes = parseTraefikPathPrefixes(labels);
   const lanUrls = buildLanUrlsFromPaths(pathPrefixes);
 
-  // Candidate order: host first (nice DNS), then LAN IP path fallback
-  const healthCandidates = uniq([...hostUrls, ...lanUrls]);
+  const healthCandidates = uniq([...lanUrls, ...hostUrls]);
 
   return {
     id: c.Id,
