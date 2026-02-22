@@ -89,6 +89,7 @@ services:
       - catalog.enable=true
       - catalog.name=AdGuard
       - catalog.description=Network level adblocking and local DNS.
+      - catalog.health.port=3000
 
       # make it visible to traefik_admin (constraint)
       - traefik.enable=true

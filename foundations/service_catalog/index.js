@@ -34,6 +34,11 @@ function uniq(arr) {
   return [...new Set(arr.filter(Boolean))];
 }
 
+function safeInt(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // Extract Host(`...`) from traefik router rules
 function parseTraefikHostUrls(labels = {}) {
   const urls = [];
@@ -80,6 +85,66 @@ function buildLanUrlsFromPaths(paths) {
   );
 }
 
+/**
+ * Normalize URLs so mount paths behave (e.g. /hh/adguard -> /hh/adguard/)
+ * This reduces false "down" for apps that redirect or expect trailing slashes.
+ */
+function normalizeHealthUrl(raw) {
+  try {
+    const u = new URL(raw);
+
+    if (!u.pathname) u.pathname = "/";
+
+    const last = u.pathname.split("/").pop() || "";
+    const looksLikeFile = last.includes(".");
+
+    if (!looksLikeFile && !u.pathname.endsWith("/")) {
+      u.pathname += "/";
+    }
+
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Join a base URL with a health path, without breaking existing path prefixes.
+ * Example: base=http://traefik_admin/hh/adguard  + /login.html
+ * => http://traefik_admin/hh/adguard/login.html
+ */
+function joinUrl(base, path) {
+  if (!path) return base;
+  try {
+    const u = new URL(base);
+
+    const addPath = path.startsWith("/") ? path : `/${path}`;
+    const basePath = u.pathname?.endsWith("/")
+      ? u.pathname.slice(0, -1)
+      : u.pathname || "";
+
+    u.pathname = `${basePath}${addPath}`;
+    return u.toString();
+  } catch {
+    return base;
+  }
+}
+
+/**
+ * Apply an explicit port to a URL (if provided).
+ * If base already contains a port, this overrides it.
+ */
+function applyPort(base, port) {
+  if (!port) return base;
+  try {
+    const u = new URL(base);
+    u.port = String(port);
+    return u.toString();
+  } catch {
+    return base;
+  }
+}
+
 async function checkUrlHealth(url) {
   let attempt = 0;
   let lastError = null;
@@ -95,12 +160,15 @@ async function checkUrlHealth(url) {
       const res = await fetch(url, {
         method: "GET",
         signal: controller.signal,
+        // keep default redirect behavior (follow). If you ever change to "manual",
+        // keep the >=400 logic below.
       });
       clearTimeout(timeout);
 
       const latency = Date.now() - start;
 
-      if (!res.ok) {
+      // Treat 2xx and 3xx as "alive". Only 4xx/5xx fail.
+      if (res.status >= 400) {
         lastError = `HTTP ${res.status}`;
         continue;
       }
@@ -108,7 +176,7 @@ async function checkUrlHealth(url) {
       return {
         health: latency >= DEGRADED_THRESHOLD_MS ? "degraded" : "up",
         responseTimeMs: latency,
-        attempts: attempt, // still useful to return
+        attempts: attempt,
         error: null,
       };
     } catch (err) {
@@ -133,7 +201,6 @@ async function checkCandidates(candidates) {
   for (const url of candidates) {
     const r = await checkUrlHealth(url);
 
-    // checkUrlHealth returns up/degraded on success, down on failure
     if (r.health === "up" || r.health === "degraded") {
       return {
         ...r,
@@ -174,7 +241,23 @@ function mapContainerToService(c) {
   const pathPrefixes = parseTraefikPathPrefixes(labels);
   const lanUrls = buildLanUrlsFromPaths(pathPrefixes);
 
-  const healthCandidates = uniq([...lanUrls, ...hostUrls]);
+  // ---- Health overrides (optional) ----
+  // Defaults: path="/" , port=null (no override)
+  const healthPath = (labels["catalog.health.path"] || "/").trim() || "/";
+  const healthPort = safeInt(labels["catalog.health.port"]);
+
+  // Base candidates: LAN path routes + host routes
+  // (LAN first is fine since DNS might not exist yet)
+  const baseCandidates = uniq([...lanUrls, ...hostUrls]);
+
+  // Apply: normalize -> add healthPath -> apply port -> normalize again
+  const healthCandidates = uniq(
+    baseCandidates
+      .map((u) => normalizeHealthUrl(u))
+      .map((u) => joinUrl(u, healthPath))
+      .map((u) => applyPort(u, healthPort))
+      .map((u) => normalizeHealthUrl(u)),
+  );
 
   return {
     id: c.Id,
@@ -185,14 +268,23 @@ function mapContainerToService(c) {
     state: c.State,
     status: c.Status,
     created: c.Created,
-    urls: hostUrls, // purely DNS-based (what you’d show as “pretty URL”)
-    lanUrls, // LAN_BASE_URL + pathprefix (what works now)
+
+    urls: hostUrls, // pretty URLs
+    lanUrls, // LAN_BASE_URL + PathPrefix routes
+
     healthCandidates, // what health checker will try
     health: c.State === "running" ? "up" : "down",
     responseTimeMs: null,
     attempts: 0,
     error: null,
     checkedUrl: null,
+
+    // Useful for debugging what got applied (safe to expose)
+    healthConfig: {
+      path: healthPath,
+      port: healthPort,
+    },
+
     labels: {
       "traefik.group": labels["traefik.group"],
     },
@@ -242,7 +334,7 @@ async function refreshSnapshot() {
         }
 
         if (!svc.healthCandidates?.length) {
-          // No routes found; treat running as "up" (or switch to "unknown" if desired)
+          // No routes found; treat running as "up"
           return { ...svc, health: "up" };
         }
 
