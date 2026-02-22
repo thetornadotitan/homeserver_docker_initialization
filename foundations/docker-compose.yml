@@ -124,7 +124,7 @@ services:
       - DEGRADED_THRESHOLD_MS=800
       - MAX_RETRIES=3
       - MAX_CONCURRENT_CHECKS=10
-      - LAN_BASE_URL=http://${LAN_IP}
+      - LAN_BASE_URL=http://traefik_admin
     depends_on:
       - docker_socket_proxy
     labels:
