@@ -1,41 +1,41 @@
-services:
-  portfolio:
-    build: ../../node_runner
-    container_name: portfolio
-    restart: unless-stopped
-    networks:
-      - public_proxy
-    environment:
-      - REPO_URL=git@github.com:thetornadotitan/MAL-Challenge-Checker.git
-      - BRANCH=main
-      - PORT=3000
-      - SSH_PRIVATE_KEY_PATH=/run/secrets/deploy_key
-    secrets:
-      - deploy_key
-    volumes:
-      - portfolio:/app/src
-    labels:
-      - traefik.enable=true
-      - traefik.group=public
+# services:
+#   portfolio:
+#     build: ../../node_runner
+#     container_name: portfolio
+#     restart: unless-stopped
+#     networks:
+#       - public_proxy
+#     environment:
+#       - REPO_URL=git@github.com:thetornadotitan/MAL-Challenge-Checker.git
+#       - BRANCH=main
+#       - PORT=3000
+#       - SSH_PRIVATE_KEY_PATH=/run/secrets/deploy_key
+#     secrets:
+#       - deploy_key
+#     volumes:
+#       - portfolio:/app/src
+#     labels:
+#       - traefik.enable=true
+#       - traefik.group=public
 
-      # Routing
-      - traefik.http.routers.portfolio.rule=Host(`isaachisey.com`)
-      - traefik.http.routers.portfolio.entrypoints=web
-      - traefik.http.services.portfolio.loadbalancer.server.port=3000
+#       # Routing
+#       - traefik.http.routers.portfolio.rule=Host(`isaachisey.com`)
+#       - traefik.http.routers.portfolio.entrypoints=web
+#       - traefik.http.services.portfolio.loadbalancer.server.port=3000
 
-      # Expose to catalog service
-      - catalog.enable=true
-      - catalog.name=Portfolio
-      - catalog.description=Main personal site (you are here!)
+#       # Expose to catalog service
+#       - catalog.enable=true
+#       - catalog.name=Portfolio
+#       - catalog.description=Main personal site (you are here!)
 
-volumes:
-  portfolio:
+# volumes:
+#   portfolio:
 
-secrets:
-  deploy_key:
-    file: ${HOME}/secrets/deploy_key
+# secrets:
+#   deploy_key:
+#     file: ${HOME}/secrets/deploy_key
 
-networks:
-  public_proxy:
-    external: true
-    name: public_proxy
+# networks:
+#   public_proxy:
+#     external: true
+#     name: public_proxy
