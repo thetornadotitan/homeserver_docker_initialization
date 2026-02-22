@@ -289,6 +289,8 @@ function startBackgroundLoop() {
 // ---- routes ----
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+app.get("/", (req, res) => res.json({ ok: true }));
+
 app.get("/services", (req, res) => {
   res.json({
     ...lastSnapshot,
