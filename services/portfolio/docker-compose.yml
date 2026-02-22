@@ -16,7 +16,6 @@
 #       - portfolio:/app/src
 #     labels:
 #       - traefik.enable=true
-#       - traefik.group=public
 
 #       # Routing
 #       - traefik.http.routers.portfolio.rule=Host(`isaachisey.com`)
@@ -24,6 +23,7 @@
 #       - traefik.http.services.portfolio.loadbalancer.server.port=3000
 
 #       # Expose to catalog service
+#       - traefik.group=public
 #       - catalog.enable=true
 #       - catalog.name=Portfolio
 #       - catalog.description=Main personal site (you are here!)

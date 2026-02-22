@@ -16,7 +16,6 @@ services:
       - mal_challenge_checker:/app/src
     labels:
       - traefik.enable=true
-      - traefik.group=public
 
       # Routing
       - traefik.http.routers.mal_challenge_checker.rule=Host(`mal.isaachisey.com`)
@@ -24,6 +23,7 @@ services:
       - traefik.http.services.mal_challenge_checker.loadbalancer.server.port=3000
 
       # Expose to catalog service
+      - traefik.group=public
       - catalog.enable=true
       - catalog.name=MAL Challenege Checker
       - catalog.description=A utility created for searching my Anime List accounts with filtering. Desperately needs updating.
