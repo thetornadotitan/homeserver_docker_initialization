@@ -6,7 +6,7 @@ services:
     networks:
       - public_proxy
     environment:
-      - REPO_URL=git@github.com:thetornadotitan/MAL-Challenge-Checker.git
+      - REPO_URL=git@github.com:thetornadotitan/nestjs-ejs-portfolio.git
       - BRANCH=main
       - PORT=3000
       - SSH_PRIVATE_KEY_PATH=/run/secrets/deploy_key
