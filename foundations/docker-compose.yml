@@ -177,6 +177,49 @@ services:
       - catalog.name=Catalog Service
       - catalog.description=Admin Updates the list of services running on the container.
 
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+
+    networks:
+      - admin_proxy
+
+    # Portainer needs Docker API access to read container status/logs, stacks, etc.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+    labels:
+      # --- Catalog ---
+      - catalog.enable=true
+      - catalog.name=Portainer
+      - catalog.description=Docker UI for logs, status, stacks, and basic monitoring.
+      # Optional: you can force health-checking via container DNS if you ever need it:
+      - catalog.health.port=9000
+      # - catalog.health.path=/
+
+      # --- Traefik discovery ---
+      - traefik.enable=true
+      - traefik.group=admin
+
+      # --- Preferred: Host-based access (most reliable with Portainer) ---
+      - traefik.http.routers.portainer.rule=Host(`portainer.hh`)
+      - traefik.http.routers.portainer.entrypoints=web
+      - traefik.http.routers.portainer.service=portainer
+      - traefik.http.services.portainer.loadbalancer.server.port=9000
+
+      # --- Optional: IP-based access via path prefix (may be flaky with Portainer UI) ---
+      - traefik.http.routers.portainer_ip.rule=PathPrefix(`/hh/portainer`)
+      - traefik.http.routers.portainer_ip.entrypoints=web
+      - traefik.http.routers.portainer_ip.priority=1
+      - traefik.http.routers.portainer_ip.service=portainer
+      - traefik.http.routers.portainer_ip.middlewares=portainer_strip
+      - traefik.http.middlewares.portainer_strip.stripprefix.prefixes=/hh/portainer
+
+  volumes:
+  portainer_data:
+
 networks:
   public_proxy:
     name: public_proxy
