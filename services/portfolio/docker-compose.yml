@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     networks:
       - public_proxy
+    env_file:
+      - .env
     environment:
       - REPO_URL=git@github.com:thetornadotitan/nestjs-ejs-portfolio.git
       - BRANCH=main
