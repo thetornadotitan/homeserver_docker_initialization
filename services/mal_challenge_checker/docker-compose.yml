@@ -30,6 +30,7 @@ services:
 
 volumes:
   mal_challenge_checker:
+    name: mal_challenge_checker
 
 secrets:
   deploy_key:

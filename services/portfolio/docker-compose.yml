@@ -30,6 +30,7 @@ services:
 
 volumes:
   portfolio:
+    name: portfolio
 
 secrets:
   deploy_key:
