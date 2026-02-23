@@ -8,9 +8,9 @@ warn() { echo "[entrypoint][WARN] $*" >&2; }
 : "${REPO_URL:?REPO_URL is required, e.g. git@github.com:org/repo.git}"
 : "${BRANCH:=main}"
 : "${APP_DIR:=/app/src}"
-: "${GIT_DEPTH:=1}"                       # shallow fetch/clone depth
+: "${GIT_DEPTH:=1}"                        # shallow fetch/clone depth
 : "${GIT_REMOTE_NAME:=origin}"
-: "${CLEAN_DIRTY_REPO:=true}"             # true => hard reset + clean -fdx before updating
+: "${CLEAN_DIRTY_REPO:=true}"              # true => hard reset + clean -fdx before updating
 : "${ALLOW_REMOTE_REWRITE:=true}"          # true => always set origin URL to REPO_URL
 : "${RECLONE_ON_MISMATCH:=true}"           # true => if repo seems wrong/corrupt, wipe + clone
 : "${SSH_KNOWN_HOSTS_STRICT:=true}"        # true => StrictHostKeyChecking=yes, else accept-new
@@ -83,9 +83,10 @@ set_origin_url() {
 }
 
 wipe_dir() {
-  log "Wiping ${APP_DIR}..."
-  rm -rf "${APP_DIR}"
+  # Safer for volume mounts: clear contents without deleting the mountpoint itself
+  log "Wiping contents of ${APP_DIR}..."
   mkdir -p "${APP_DIR}"
+  rm -rf "${APP_DIR:?}/"* "${APP_DIR:?}/".[^.]* "${APP_DIR:?}/"..?* 2>/dev/null || true
 }
 
 clone_repo() {
@@ -110,31 +111,58 @@ clean_repo() {
 }
 
 fetch_and_reset() {
-  log "Fetching origin/${BRANCH} (depth=${GIT_DEPTH})..."
+  log "Fetching ${GIT_REMOTE_NAME}/${BRANCH} (depth=${GIT_DEPTH})..."
   git -C "${APP_DIR}" fetch --depth "${GIT_DEPTH}" "${GIT_REMOTE_NAME}" "${BRANCH}"
   log "Resetting to ${GIT_REMOTE_NAME}/${BRANCH}..."
   git -C "${APP_DIR}" reset --hard "${GIT_REMOTE_NAME}/${BRANCH}"
 }
 
 verify_repo_sanity() {
-  # Basic sanity: must have package.json, and origin should match (after rewrite if enabled)
+  # Basic sanity: must have package.json and a usable git repo
   [[ -f "${APP_DIR}/package.json" ]] || return 10
-
-  if git -C "${APP_DIR}" remote >/dev/null 2>&1; then
-    :
-  else
-    return 11
-  fi
-
-  # Confirm that target branch exists on remote (after fetch is ok too; we check locally first)
-  # If branch isn't present locally yet, rev-parse will fail until we fetch.
+  git -C "${APP_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 11
   return 0
 }
+
+repo_slug() {
+  # Returns "owner/repo" from common git URL formats
+  local url="$1"
+  url="${url%.git}"
+  url="${url#ssh://}"
+  url="${url#git@github.com:}"
+  url="${url#https://github.com/}"
+  url="${url#http://github.com/}"
+  echo "$url"
+}
+
+did_fresh_clone="false"
+
+# If a repo already exists in the mounted dir, enforce that it's the repo we expect.
+# If you change REPO_URL in compose, this ensures you never keep the old repo around.
+existing_origin="$(current_origin_url)"
+expected_slug="$(repo_slug "${REPO_URL}")"
+existing_slug="$(repo_slug "${existing_origin:-}")"
+
+log "Expected repo: ${expected_slug}"
+log "Existing repo: ${existing_slug:-<none>}"
+
+if [[ -n "${existing_slug}" && "${existing_slug}" != "${expected_slug}" ]]; then
+  warn "Repo mismatch detected (${existing_slug} != ${expected_slug})."
+  if [[ "${bool_RECLONE_ON_MISMATCH}" == "true" ]]; then
+    wipe_dir
+    clone_repo
+    did_fresh_clone="true"
+  else
+    die "Repo mismatch and RECLONE_ON_MISMATCH=false"
+  fi
+fi
 
 # ---------- Git checkout/update ----------
 log "Ensuring application checkout in ${APP_DIR}..."
 
-if ! is_git_repo; then
+if [[ "${did_fresh_clone}" == "true" ]]; then
+  log "Fresh clone already performed due to repo mismatch."
+elif ! is_git_repo; then
   log "No valid git repo found at ${APP_DIR}."
   clone_repo
 else
@@ -156,7 +184,9 @@ else
     set_origin_url || {
       if [[ "${bool_RECLONE_ON_MISMATCH}" == "true" ]]; then
         warn "Failed to set remote URL; recloning."
+        wipe_dir
         clone_repo
+        did_fresh_clone="true"
       else
         die "Failed to set remote URL and RECLONE_ON_MISMATCH=false"
       fi
@@ -165,7 +195,9 @@ else
     if [[ -n "${existing_origin}" && "${existing_origin}" != "${REPO_URL}" ]]; then
       if [[ "${bool_RECLONE_ON_MISMATCH}" == "true" ]]; then
         warn "Origin mismatch and ALLOW_REMOTE_REWRITE=false; recloning."
+        wipe_dir
         clone_repo
+        did_fresh_clone="true"
       else
         die "Origin mismatch (${existing_origin} != ${REPO_URL}) and ALLOW_REMOTE_REWRITE=false"
       fi
@@ -173,12 +205,13 @@ else
   fi
 
   # Update to desired branch head
-  if is_git_repo; then
-    # Ensure branch exists / can be fetched
+  if [[ "${did_fresh_clone}" != "true" ]] && is_git_repo; then
     if ! git -C "${APP_DIR}" ls-remote --exit-code --heads "${GIT_REMOTE_NAME}" "${BRANCH}" >/dev/null 2>&1; then
       if [[ "${bool_RECLONE_ON_MISMATCH}" == "true" ]]; then
-        warn "Remote does not have branch '${BRANCH}' or cannot access it; recloning may not help but will retry."
+        warn "Remote does not have branch '${BRANCH}' or cannot access it; recloning."
+        wipe_dir
         clone_repo
+        did_fresh_clone="true"
       else
         die "Remote does not have branch '${BRANCH}' or cannot access it."
       fi
@@ -192,6 +225,7 @@ fi
 if ! verify_repo_sanity; then
   if [[ "${bool_RECLONE_ON_MISMATCH}" == "true" ]]; then
     warn "Repo sanity check failed (missing package.json or repo broken). Recloning..."
+    wipe_dir
     clone_repo
     verify_repo_sanity || die "Repo sanity check still failing after reclone."
   else
