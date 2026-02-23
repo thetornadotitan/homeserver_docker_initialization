@@ -90,9 +90,17 @@ wipe_dir() {
 
 clone_repo() {
   log "Cloning ${REPO_URL} (branch=${BRANCH}, depth=${GIT_DEPTH}) into ${APP_DIR}..."
-  # clone into empty directory path
-  rm -rf "${APP_DIR}"
-  git clone --depth "${GIT_DEPTH}" --branch "${BRANCH}" "${REPO_URL}" "${APP_DIR}"
+
+  mkdir -p "${APP_DIR}"
+  tmp="$(mktemp -d)"
+
+  git clone --depth "${GIT_DEPTH}" --branch "${BRANCH}" "${REPO_URL}" "${tmp}/repo"
+
+  log "Replacing contents of ${APP_DIR}..."
+  rm -rf "${APP_DIR:?}/"* "${APP_DIR:?}/".[^.]* "${APP_DIR:?}/"..?* 2>/dev/null || true
+  # Move cloned contents into mounted dir
+  cp -a "${tmp}/repo/." "${APP_DIR}/"
+  rm -rf "${tmp}"
 }
 
 clean_repo() {
