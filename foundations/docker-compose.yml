@@ -217,7 +217,7 @@ services:
       - traefik.http.routers.portainer_ip.middlewares=portainer_strip
       - traefik.http.middlewares.portainer_strip.stripprefix.prefixes=/hh/portainer
 
-  volumes:
+volumes:
   portainer_data:
 
 networks:
