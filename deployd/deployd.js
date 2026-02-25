@@ -131,7 +131,7 @@ function discoverGithubServices() {
     const services = doc.services || {};
     if (typeof services !== "object") continue;
 
-    for (const [composeServiceName, svc] of Object.entries < any > services) {
+    for (const [composeServiceName, svc] of Object.entries(services)) {
       if (!svc || typeof svc !== "object") continue;
       const env = envToObj(svc.environment);
       if (!env.REPO_URL) continue;
