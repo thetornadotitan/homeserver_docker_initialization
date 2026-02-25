@@ -29,18 +29,25 @@ function abs(p) {
   return isAbsolute(p) ? p : resolve(__dirname, p);
 }
 
-const SERVICES_ROOT = process.env.SERVICES_ROOT
-  ? abs(process.env.SERVICES_ROOT)
+/**
+ * New layout:
+ * - SERVICES_DIR: parent folder containing many compose projects
+ *   e.g. ../services
+ * - GITHUB_DIR:   git-polled compose projects live under ../services/github
+ */
+const SERVICES_DIR = process.env.SERVICES_DIR
+  ? abs(process.env.SERVICES_DIR)
   : abs("../services");
+
+const GITHUB_DIR = process.env.GITHUB_DIR
+  ? abs(process.env.GITHUB_DIR)
+  : join(SERVICES_DIR, "github");
 
 const STATE_FILE = process.env.STATE_FILE
   ? abs(process.env.STATE_FILE)
   : abs("./state.json");
-
 const POLL_SECONDS = Number(process.env.POLL_SECONDS || 60);
-
 const DEFAULT_BRANCH = process.env.DEFAULT_BRANCH || "main";
-
 const SSH_KEY_PATH = abs(process.env.SSH_KEY_PATH || "~/secrets/deploy_key");
 
 function log(...args) {
@@ -61,6 +68,7 @@ function writeState(state) {
 }
 
 function listServiceDirs(root) {
+  if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => join(root, d.name));
@@ -101,9 +109,14 @@ function envToObj(env) {
   return {};
 }
 
-function discoverServices() {
+/**
+ * GitHub-driven: only look under GITHUB_DIR, and only include services
+ * where the compose service environment contains REPO_URL.
+ */
+function discoverGithubServices() {
   const results = [];
-  for (const dir of listServiceDirs(SERVICES_ROOT)) {
+
+  for (const dir of listServiceDirs(GITHUB_DIR)) {
     const composePath = findComposeFile(dir);
     if (!composePath) continue;
 
@@ -118,7 +131,7 @@ function discoverServices() {
     const services = doc.services || {};
     if (typeof services !== "object") continue;
 
-    for (const [composeServiceName, svc] of Object.entries(services)) {
+    for (const [composeServiceName, svc] of Object.entries < any > services) {
       if (!svc || typeof svc !== "object") continue;
       const env = envToObj(svc.environment);
       if (!env.REPO_URL) continue;
@@ -132,9 +145,31 @@ function discoverServices() {
         branch: env.BRANCH || DEFAULT_BRANCH,
       });
 
-      // Typically you only want one repo-driven service per folder
+      // Usually one repo-driven service per folder
       break;
     }
+  }
+  return results;
+}
+
+/**
+ * Non-GitHub: look under SERVICES_DIR excluding "github".
+ * Any folder with a compose file is considered a "static compose project".
+ */
+function discoverStaticComposeProjects() {
+  const results = [];
+
+  for (const dir of listServiceDirs(SERVICES_DIR)) {
+    if (basename(dir) === "github") continue;
+
+    const composePath = findComposeFile(dir);
+    if (!composePath) continue;
+
+    results.push({
+      name: basename(dir),
+      composeDir: dir,
+      composeFile: basename(composePath),
+    });
   }
   return results;
 }
@@ -155,7 +190,10 @@ function gitRemoteSha(repoUrl, branch) {
   return out.split(/\s+/)[0] || null;
 }
 
-function runCompose(composeDir, composeFile, composeServiceName) {
+/**
+ * GitHub deploy behavior: force recreate the single service in the compose file.
+ */
+function runComposeService(composeDir, composeFile, composeServiceName) {
   return new Promise((resolve, reject) => {
     const args = [
       "compose",
@@ -176,16 +214,66 @@ function runCompose(composeDir, composeFile, composeServiceName) {
   });
 }
 
+/**
+ * Static projects: bring up the whole compose project (all services) only if it's down.
+ * "Down" here means: docker compose ps shows zero running services for that project.
+ */
+function anyServicesRunning(composeDir, composeFile) {
+  try {
+    const out = execFileSync(
+      "docker",
+      ["compose", "-f", composeFile, "ps", "--status", "running", "--services"],
+      { cwd: composeDir, encoding: "utf8" },
+    ).trim();
+    return out.length > 0;
+  } catch {
+    // If compose errors (e.g., never started / no project), treat as not running.
+    return false;
+  }
+}
+
+function runComposeProjectUp(composeDir, composeFile) {
+  return new Promise((resolve, reject) => {
+    const args = ["compose", "-f", composeFile, "up", "-d"];
+    log(`[UP] (${composeDir}) docker ${args.join(" ")}`);
+    const p = spawn("docker", args, { cwd: composeDir, stdio: "inherit" });
+    p.on("exit", (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`docker compose exited ${code}`)),
+    );
+  });
+}
+
 let isTickRunning = false;
 
 async function tick() {
   if (isTickRunning) return;
   isTickRunning = true;
   try {
-    const state = readState();
-    const services = discoverServices();
+    // 1) Ensure non-github compose projects are running
+    const staticProjects = discoverStaticComposeProjects();
+    for (const proj of staticProjects) {
+      const running = anyServicesRunning(proj.composeDir, proj.composeFile);
+      if (running) {
+        log(`[${proj.name}] static compose ok (running)`);
+        continue;
+      }
 
-    // remove stale entries
+      log(`[${proj.name}] static compose not running -> starting`);
+      try {
+        await runComposeProjectUp(proj.composeDir, proj.composeFile);
+        log(`[${proj.name}] static compose started`);
+      } catch (e) {
+        log(`[${proj.name}] static compose START FAILED: ${e.message}`);
+      }
+    }
+
+    // 2) GitHub-driven deploys (poll + redeploy)
+    const state = readState();
+    const services = discoverGithubServices();
+
+    // remove stale entries (only for github-polled services)
     const currentNames = new Set(services.map((s) => s.name));
     for (const k of Object.keys(state.services || {})) {
       if (!currentNames.has(k)) delete state.services[k];
@@ -194,6 +282,7 @@ async function tick() {
     for (const svc of services) {
       const prev = state.services[svc.name]?.sha || "";
       let remote;
+
       try {
         remote = gitRemoteSha(svc.repoUrl, svc.branch);
       } catch (e) {
@@ -215,7 +304,7 @@ async function tick() {
       );
 
       try {
-        await runCompose(
+        await runComposeService(
           svc.composeDir,
           svc.composeFile,
           svc.composeServiceName,
@@ -237,7 +326,7 @@ async function tick() {
 
 async function main() {
   log(
-    `deployd starting. root=${SERVICES_ROOT} poll=${POLL_SECONDS}s state=${STATE_FILE}`,
+    `deployd starting. services=${SERVICES_DIR} github=${GITHUB_DIR} poll=${POLL_SECONDS}s state=${STATE_FILE}`,
   );
   await tick();
   setInterval(

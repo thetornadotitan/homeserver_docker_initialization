@@ -1,0 +1,63 @@
+services:
+  home_assistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: home_assistant
+    restart: unless-stopped
+
+    # Home Assistant generally needs host networking / privileged for USB, mDNS,
+    # and various integrations. Since your admin edge is Traefik-on-bridge,
+    # we keep it on admin_proxy and add the typical capabilities.
+    # If you do NOT need USB/host device access, you can remove privileged + devices.
+    privileged: true
+
+    # Optional: pass through common serial devices (Zigbee/Z-Wave dongles)
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    #   - /dev/ttyACM0:/dev/ttyACM0
+
+    environment:
+      - TZ=${TZ:-America/New_York}
+
+    volumes:
+      - ./home-assistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+
+    networks:
+      - admin_proxy
+
+    # If you rely on mDNS/SSDP discovery across your LAN, you may need these.
+    # Many users run HA with host networking for this reason, but that breaks Traefik bridge routing.
+    # Try without first; if discovery is painful, consider adding an mDNS reflector (avahi) on the host.
+    # ports:
+    #   - "8123:8123" # (direct access, optional)
+
+    labels:
+      # --- Catalog ---
+      - catalog.enable=true
+      - catalog.name=Home Assistant
+      - catalog.description=Home automation hub (LAN-only) proxied through Traefik Admin.
+      - catalog.health.port=8123
+      # - catalog.health.path=/
+
+      # --- Traefik discovery ---
+      - traefik.enable=true
+      - traefik.group=admin
+
+      # --- Host-based access (preferred) ---
+      - traefik.http.routers.home_assistant.rule=Host(`ha.hh`)
+      - traefik.http.routers.home_assistant.entrypoints=web
+      - traefik.http.routers.home_assistant.service=home_assistant
+      - traefik.http.services.home_assistant.loadbalancer.server.port=8123
+
+      # --- IP-based access via path prefix (optional) ---
+      - traefik.http.routers.home_assistant_ip.rule=PathPrefix(`/hh/ha`)
+      - traefik.http.routers.home_assistant_ip.entrypoints=web
+      - traefik.http.routers.home_assistant_ip.priority=1
+      - traefik.http.routers.home_assistant_ip.service=home_assistant
+      - traefik.http.routers.home_assistant_ip.middlewares=home_assistant_strip
+      - traefik.http.middlewares.home_assistant_strip.stripprefix.prefixes=/hh/ha
+
+networks:
+  admin_proxy:
+    external: true
+    name: admin_proxy
