@@ -1,0 +1,55 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: mysql
+    restart: unless-stopped
+
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+
+    command:
+      # Reasonable defaults; adjust as needed
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --max_connections=250
+
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      # Optional: place .sql or .sh init scripts here for first-run bootstrap
+      - ./mysql/init:/docker-entrypoint-initdb.d
+
+    networks:
+      - admin_proxy
+
+    # Optional: direct host access (e.g., for local dev tools)
+    ports:
+      - "${LAN_IP}:3306:3306"
+
+    labels:
+      # --- Catalog ---
+      - catalog.enable=false
+      - catalog.name=MySQL
+      - catalog.description=MySQL 8 server (LAN-only) on admin_proxy network.
+      - catalog.health.port=3306
+
+      # --- Traefik ---
+      # Traefik (HTTP) cannot proxy MySQL TCP unless your Traefik is configured with a TCP entrypoint.
+      # Leave these disabled unless you have Traefik TCP configured (example below).
+      - traefik.enable=false
+
+      # --- Traefik TCP example (enable only if you have a tcp entrypoint like "mysql") ---
+      # - traefik.enable=true
+      # - traefik.tcp.routers.mysql.rule=HostSNI(`*`)
+      # - traefik.tcp.routers.mysql.entrypoints=mysql
+      # - traefik.tcp.routers.mysql.service=mysql
+      # - traefik.tcp.services.mysql.loadbalancer.server.port=3306
+
+networks:
+  admin_proxy:
+    external: true
+    name: admin_proxy
