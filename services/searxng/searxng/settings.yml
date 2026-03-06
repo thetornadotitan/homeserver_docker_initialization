@@ -2,8 +2,12 @@ use_default_settings: true
 
 server:
   secret_key: "cdfd8d970eb0b0bae54680b323f52d9ad1cfc84abc26793fc1181abe9e4f8c39"
-  limiter: false
-  image_proxy: true
+  base_url: "http://192.168.0.150:8082/"
+
+search:
+  formats:
+    - html
+    - json
 
 redis:
   url: redis://redis:6379/0
