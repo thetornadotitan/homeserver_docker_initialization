@@ -4,7 +4,7 @@ services:
     container_name: searxng
     restart: unless-stopped
     ports:
-      - "8082:8082"
+      - "${LAN_IP}:8082:8082"
     volumes:
       - ./config:/etc/searxng:rw
     environment:
