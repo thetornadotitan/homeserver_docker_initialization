@@ -1,0 +1,50 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./config:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=${LAN_IP}:8082/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    labels:
+    # --- Catalog ---
+    - catalog.enable=false
+    - catalog.name=SearXNG
+    - catalog.description=Local MCP server for AI web seeaching
+    - catalog.health.port=8082
+
+    # --- Traefik discovery ---
+    - traefik.enable=true
+    - traefik.group=admin
+
+    # --- Host-based access (preferred) ---
+    - traefik.http.routers.searxng.rule=Host(`searxng.hh`)
+    - traefik.http.routers.searxng.entrypoints=web
+    - traefik.http.routers.searxng.service=searxng
+    - traefik.http.services.searxng.loadbalancer.server.port=8123
+
+    # --- IP-based access via path prefix (optional) ---
+    - traefik.http.routers.searxng.rule=PathPrefix(`/hh/searxng`)
+    - traefik.http.routers.searxng.entrypoints=web
+    - traefik.http.routers.searxng.priority=1
+    - traefik.http.routers.searxng.service=home_assistant
+    - traefik.http.routers.searxng.middlewares=searxng
+    - traefik.http.middlewares.searxng.stripprefix.prefixes=/hh/searxng
+  redis:
+    image: valkey/valkey:8-alpine # or redis:alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+  
+volumes:
+  redis-data:
