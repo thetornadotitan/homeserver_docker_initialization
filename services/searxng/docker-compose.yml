@@ -5,43 +5,32 @@ services:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
-
-    # Host port 8082 -> container port 8080
     ports:
       - "8082:8080"
-
     volumes:
-      - ./config:/etc/searxng:rw
-
+      - ./searxng:/etc/searxng:rw
     environment:
-      # Must be a full URL with scheme
       - SEARXNG_BASE_URL=http://192.168.0.150:8082/
-
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
       - SETGID
       - SETUID
-
     labels:
-      # Optional catalog labels
       - catalog.enable=false
       - catalog.name=SearXNG
       - catalog.description=Local MCP search backend
-      - catalog.health.port=8080
+      - catalog.health.port=8082
 
-      # Traefik
       - traefik.enable=true
       - traefik.group=admin
 
-      # Host-based route: http://searxng.hh
       - traefik.http.routers.searxng.rule=Host(`searxng.hh`)
       - traefik.http.routers.searxng.entrypoints=web
       - traefik.http.routers.searxng.service=searxng
       - traefik.http.services.searxng.loadbalancer.server.port=8080
 
-      # Path-based route: http://<your-traefik-host>/hh/searxng
       - traefik.http.routers.searxng-path.rule=PathPrefix(`/hh/searxng`)
       - traefik.http.routers.searxng-path.entrypoints=web
       - traefik.http.routers.searxng-path.priority=1
