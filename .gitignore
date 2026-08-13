@@ -3,3 +3,9 @@
 */*dist
 */*build
 */*state.json
+
+deployd/ecosystem.config.cjs
+foundations/adguard/
+services/home-assistant/home-assistant/
+services/mysql/mysql/
+services/postgres/postgres/

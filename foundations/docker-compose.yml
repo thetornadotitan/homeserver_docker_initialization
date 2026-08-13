@@ -11,6 +11,7 @@ services:
       - --providers.docker.exposedbydefault=false
       - --providers.docker.constraints=Label(`traefik.group`,`public`)
       - --entrypoints.web.address=:80
+      - --entrypoints.postgres.address=:5432
       - --log.level=INFO
     networks:
       - public_proxy
